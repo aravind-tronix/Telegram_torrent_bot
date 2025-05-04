@@ -2,15 +2,19 @@ from configs.url_shit import my_bot
 import telegram
 from telegram import ReplyKeyboardMarkup
 
-telegram_username = "Contact admin @your_telegram_user_name" #replace with your username
+# replace with your username
+telegram_username = "Contact admin @your_telegram_user_name"
 
 
 def welcome(chatid):
-    welcome = "Hi! What data do you want? type in for a search or choose from the below keyboard buttons."
-    markup = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[['Read me'], [
-                                 'now playing movies'], ['Top movies', "Top apps"], ["Privacy Policy", "Terms"]])
-    my_bot().send_message(chatid, welcome,
-                        reply_markup=markup)
+    reply_text = "Hello! Choose an option or type to start the search:"
+    keyboard = {
+        "keyboard": [['Read me'], [
+            'now playing movies'], ['Top movies', "Top apps"], ["Privacy Policy", "Terms"]],
+        "resize_keyboard": True,
+        "one_time_keyboard": True
+    }
+    return chatid, reply_text, keyboard
 
 
 def read_me(chatid):
@@ -25,7 +29,7 @@ def read_me(chatid):
             {telegram_username}
             '''
     my_bot().send_message(chatid, readme,
-                        parse_mode=telegram.ParseMode.HTML)
+                          parse_mode=telegram.ParseMode.HTML)
 
 
 def privacy(chatid):
@@ -36,7 +40,7 @@ def privacy(chatid):
             {telegram_username}
             '''
     my_bot().send_message(chatid, privacy,
-                        parse_mode=telegram.ParseMode.HTML)
+                          parse_mode=telegram.ParseMode.HTML)
 
 
 def terms(chatid):
@@ -46,4 +50,4 @@ def terms(chatid):
             {telegram_username}
             '''
     my_bot().send_message(chatid, terms,
-                        parse_mode=telegram.ParseMode.HTML)
+                          parse_mode=telegram.ParseMode.HTML)

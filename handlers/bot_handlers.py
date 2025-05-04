@@ -2,16 +2,16 @@ from configs.url_shit import my_bot, scrap_master, movies_api
 from configs.blah_blah import welcome
 from handlers.letme_handle import listToString
 from bs4 import BeautifulSoup
-import requests
-import telegram
-import telegram.bot
+# import requests
+# import telegram
+# import telegram.bot
 import json
 import random
 
 
 def start(chatid):
-    
-    welcome(chatid)
+
+    return welcome(chatid)
 
 
 def top_movies(chatid, context):
@@ -124,7 +124,7 @@ def now_playing(chatid):
         final_data.append(send_data+"\n\n")
     final_str = listToString(final_data)
     my_bot().send_message(chatid, text="Click a movie name to copy. Paste and get torrent links." +
-                        "\n\n"+final_str, parse_mode=telegram.ParseMode.HTML)
+                          "\n\n"+final_str, parse_mode=telegram.ParseMode.HTML)
     my_bot().send_message(chatid, 'show more movies?\n\n'+"/load_more")
 
 
@@ -150,11 +150,11 @@ def load_more(chatid):
         final_data.append(send_data+"\n\n")
     final_str = listToString(final_data)
     my_bot().send_message(chatid, text="Click a movie name to get torrent links." +
-                        "\n\n"+final_str, parse_mode=telegram.ParseMode.HTML)
+                          "\n\n"+final_str, parse_mode=telegram.ParseMode.HTML)
     my_bot().send_message(chatid, 'show more movies?\n\n'+"/load_more")
 
 
-def search_engine(user_message,chatid, context):
+def search_engine(user_message, chatid, context):
     user_message = user_message.replace("_", " ").replace("/", "")
     URL = f'{scrap_master()}/search/'+user_message+'/1/'
     results, result_links, name, fname, seeders, size = [], [], [], [], [], []
@@ -201,7 +201,7 @@ def search_engine(user_message,chatid, context):
     for odd in res2:
         fname.append(name[odd])
 
-    if(len(seeders) != 0):
+    if (len(seeders) != 0):
         for (fname, res1, seeders, size) in zip(fname, res1, seeders, size):
             context.bot.send_message(chat_id=chatid, text="title:"+"<b>"+fname+"</b>"+"\n"+"seeders:"+"<b>" +
                                      seeders+"</b>"+"\n"+"links:"+"<code>"+res1+"</code>"+"\n"+"\n"+"size:"+size, parse_mode=telegram.ParseMode.HTML)
