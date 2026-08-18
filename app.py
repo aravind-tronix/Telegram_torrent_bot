@@ -5,9 +5,9 @@ import logging
 import os
 from pathlib import Path
 
-from telegram import Update
+from telegram import BotCommand, ReplyKeyboardMarkup, Update
 from telegram.constants import ParseMode
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 from prowlarr_client import ProwlarrClient, format_result
 
@@ -33,11 +33,80 @@ def result_limit() -> int:
         return 10
 
 
+def admin_contact() -> str:
+    return os.environ.get("BOT_ADMIN_CONTACT", "Contact admin @aravind_at_telegram")
+
+
+def menu_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            ["Search"],
+            ["Read me"],
+            ["Privacy Policy", "Terms"],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def info_response(label: str) -> str:
+    contact = admin_contact()
+    messages = {
+        "Read me": (
+            "Welcome to Torrent Bot. Here are some clarifications\n\n"
+            "<b>Do i need a vpn to use this bot?</b>\n"
+            "No. You do not require a vpn to search using this bot.\n\n"
+            "<b>Why are some torrent links not opening?</b>\n"
+            "Some ISPs may block torrent sites or torrent files. If a link does not open, "
+            "try a VPN or another client.\n\n"
+            f"{contact}"
+        ),
+        "Privacy Policy": (
+            "Welcome to Torrent Bot. Our privacy policy\n\n"
+            "We don't store your data or search queries in the bot code. "
+            "Searches are sent to the local Prowlarr service configured by the bot owner.\n\n"
+            f"{contact}"
+        ),
+        "Terms": (
+            "Welcome to Torrent Bot. Terms of use\n\n"
+            "We are not responsible for the contents you see, open, or download using this bot. "
+            "Use it only where you have the legal right to access the content.\n\n"
+            f"{contact}"
+        ),
+    }
+    return messages[label]
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
-        "Send /search <query> to search configured torrent indexers.\n"
+        "Hi! Send /search <query> or choose from the menu below.\n"
         "Example: /search ubuntu\n\n"
-        "Sources are served through local Prowlarr, not direct site scraping."
+        "Sources are served through local Prowlarr, not direct site scraping.",
+        reply_markup=menu_keyboard(),
+    )
+
+
+async def readme(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.effective_message.reply_html(info_response("Read me"), reply_markup=menu_keyboard())
+
+
+async def privacy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.effective_message.reply_html(info_response("Privacy Policy"), reply_markup=menu_keyboard())
+
+
+async def terms(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.effective_message.reply_html(info_response("Terms"), reply_markup=menu_keyboard())
+
+
+async def configure_bot_commands(application: Application) -> None:
+    await application.bot.set_my_commands(
+        [
+            BotCommand("start", "Show menu"),
+            BotCommand("search", "Search torrents"),
+            BotCommand("status", "Check Prowlarr status"),
+            BotCommand("readme", "How to use this bot"),
+            BotCommand("privacy", "Privacy policy"),
+            BotCommand("terms", "Terms of use"),
+        ]
     )
 
 
@@ -65,6 +134,12 @@ async def free_text_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     text = (update.effective_message.text or "").strip()
     if not text:
         return
+    if text in {"Read me", "Privacy Policy", "Terms"}:
+        await update.effective_message.reply_html(info_response(text), reply_markup=menu_keyboard())
+        return
+    if text == "Search":
+        await update.effective_message.reply_text("Type /search <query> or just send the search text.", reply_markup=menu_keyboard())
+        return
     await run_search(update, context, text)
 
 
@@ -90,18 +165,21 @@ async def run_search(update: Update, context: ContextTypes.DEFAULT_TYPE, query: 
         )
 
 
-def build_app() -> object:
+def build_app() -> Application:
     load_env_file(os.environ.get("BOT_ENV_FILE", "/root/.config/telegram-torrent-bot/bot.env"))
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is required")
 
-    application = ApplicationBuilder().token(token).build()
+    application = ApplicationBuilder().token(token).post_init(configure_bot_commands).build()
     application.bot_data["prowlarr"] = ProwlarrClient()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", start))
     application.add_handler(CommandHandler("status", status))
     application.add_handler(CommandHandler("search", search))
+    application.add_handler(CommandHandler("readme", readme))
+    application.add_handler(CommandHandler("privacy", privacy))
+    application.add_handler(CommandHandler("terms", terms))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, free_text_search))
     return application
 
