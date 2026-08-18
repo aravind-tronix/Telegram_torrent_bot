@@ -10,6 +10,7 @@ from telegram.constants import ParseMode
 from telegram.ext import AIORateLimiter, Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 from prowlarr_client import ProwlarrClient, TorrentResult, format_result
+from user_store import UserStore, build_user_store_from_env
 
 LOG = logging.getLogger(__name__)
 
@@ -85,6 +86,7 @@ def info_response(label: str) -> str:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await remember_chat_id_middleware(update, context)
     await update.effective_message.reply_text(
         "Hi! Send /search <query> or choose from the menu below.\n"
         "Example: /search ubuntu\n\n"
@@ -94,14 +96,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def readme(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await remember_chat_id_middleware(update, context)
     await update.effective_message.reply_html(info_response("Read me"), reply_markup=menu_keyboard())
 
 
 async def privacy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await remember_chat_id_middleware(update, context)
     await update.effective_message.reply_html(info_response("Privacy Policy"), reply_markup=menu_keyboard())
 
 
 async def terms(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await remember_chat_id_middleware(update, context)
     await update.effective_message.reply_html(info_response("Terms"), reply_markup=menu_keyboard())
 
 
@@ -118,7 +123,24 @@ async def configure_bot_commands(application: Application) -> None:
     )
 
 
+async def remember_chat_id(update: Update, store: UserStore) -> bool:
+    if update.effective_chat is None:
+        return False
+    return await asyncio.to_thread(store.ensure_user, int(update.effective_chat.id))
+
+
+async def remember_chat_id_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    store: UserStore | None = context.application.bot_data.get("user_store")
+    if store is None:
+        return
+    try:
+        await remember_chat_id(update, store)
+    except Exception:  # noqa: BLE001 - persistence must never break bot replies
+        LOG.exception("failed to persist Telegram chat id")
+
+
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await remember_chat_id_middleware(update, context)
     client: ProwlarrClient = context.application.bot_data["prowlarr"]
     try:
         results = await asyncio.to_thread(client.search, "ubuntu", 3)
@@ -131,6 +153,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await remember_chat_id_middleware(update, context)
     query = " ".join(context.args).strip()
     if not query:
         await update.effective_message.reply_text("Usage: /search <movie/app/software/query>")
@@ -139,6 +162,7 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def free_text_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await remember_chat_id_middleware(update, context)
     text = (update.effective_message.text or "").strip()
     if not text:
         return
@@ -199,6 +223,7 @@ def build_app() -> Application:
         .build()
     )
     application.bot_data["prowlarr"] = ProwlarrClient()
+    application.bot_data["user_store"] = build_user_store_from_env()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", start))
     application.add_handler(CommandHandler("status", status))
