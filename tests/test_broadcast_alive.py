@@ -36,6 +36,8 @@ def test_default_message_tells_users_to_restart_and_use_bot():
     assert "/search" in DEFAULT_MESSAGE
     assert "restart" in DEFAULT_MESSAGE.lower()
     assert "Read me" in DEFAULT_MESSAGE
+    assert "https://t.me/Torrent_link_bot" in DEFAULT_MESSAGE
+    assert "share" in DEFAULT_MESSAGE.lower()
 
 
 def test_iter_chat_ids_dedupes_and_ignores_bad_rows():

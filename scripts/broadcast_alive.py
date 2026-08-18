@@ -20,7 +20,9 @@ DEFAULT_MESSAGE = (
     "How to use:\n"
     "• Tap /start\n"
     "• Use /search movie name or just send the movie/app/software name\n"
-    "• Use Read me, Privacy Policy, and Terms from the menu"
+    "• Use Read me, Privacy Policy, and Terms from the menu\n\n"
+    "If you like the bot, share it with your friends:\n"
+    "https://t.me/Torrent_link_bot"
 )
 
 
