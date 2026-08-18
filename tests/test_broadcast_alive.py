@@ -1,6 +1,6 @@
 import asyncio
 
-from scripts.broadcast_alive import BroadcastStats, iter_chat_ids, run_broadcast
+from scripts.broadcast_alive import BroadcastStats, DEFAULT_MESSAGE, iter_chat_ids, run_broadcast
 
 
 class FakeCollection:
@@ -29,6 +29,13 @@ async def fake_sleep(seconds):
 
 
 fake_sleep.calls = []
+
+
+def test_default_message_tells_users_to_restart_and_use_bot():
+    assert "/start" in DEFAULT_MESSAGE
+    assert "/search" in DEFAULT_MESSAGE
+    assert "restart" in DEFAULT_MESSAGE.lower()
+    assert "Read me" in DEFAULT_MESSAGE
 
 
 def test_iter_chat_ids_dedupes_and_ignores_bad_rows():

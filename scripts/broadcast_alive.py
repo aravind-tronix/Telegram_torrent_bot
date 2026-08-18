@@ -14,7 +14,14 @@ from telegram import Bot
 from telegram.error import Forbidden, RetryAfter
 
 LOG = logging.getLogger(__name__)
-DEFAULT_MESSAGE = "✅ Torrent bot is back alive. You can use /search again."
+DEFAULT_MESSAGE = (
+    "✅ Torrent Bot is back online!\n\n"
+    "Please restart the bot with /start to refresh the menu.\n\n"
+    "How to use:\n"
+    "• Tap /start\n"
+    "• Use /search movie name or just send the movie/app/software name\n"
+    "• Use Read me, Privacy Policy, and Terms from the menu"
+)
 
 
 @dataclass(frozen=True)
