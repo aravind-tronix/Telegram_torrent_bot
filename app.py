@@ -7,9 +7,9 @@ from pathlib import Path
 
 from telegram import BotCommand, ReplyKeyboardMarkup, Update
 from telegram.constants import ParseMode
-from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import AIORateLimiter, Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
-from prowlarr_client import ProwlarrClient, format_result
+from prowlarr_client import ProwlarrClient, TorrentResult, format_result
 
 LOG = logging.getLogger(__name__)
 
@@ -31,6 +31,14 @@ def result_limit() -> int:
         return max(1, min(20, int(os.environ.get("BOT_RESULT_LIMIT", "10"))))
     except ValueError:
         return 10
+
+
+def message_interval_seconds() -> float:
+    try:
+        interval = float(os.environ.get("BOT_MESSAGE_INTERVAL_SECONDS", "1.1"))
+    except ValueError:
+        interval = 1.1
+    return max(0.5, min(5.0, interval))
 
 
 def admin_contact() -> str:
@@ -143,6 +151,22 @@ async def free_text_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await run_search(update, context, text)
 
 
+async def send_results(
+    update: Update,
+    results: list[TorrentResult],
+    delay_seconds: float | None = None,
+    sleeper=asyncio.sleep,
+) -> None:
+    delay = message_interval_seconds() if delay_seconds is None else delay_seconds
+    for idx, result in enumerate(results, start=1):
+        await update.effective_message.reply_html(
+            format_result(result, idx),
+            disable_web_page_preview=True,
+        )
+        if idx < len(results):
+            await sleeper(delay)
+
+
 async def run_search(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str) -> None:
     client: ProwlarrClient = context.application.bot_data["prowlarr"]
     notice = await update.effective_message.reply_text(f"Searching Prowlarr for: {query}")
@@ -157,12 +181,8 @@ async def run_search(update: Update, context: ContextTypes.DEFAULT_TYPE, query: 
         await notice.edit_text("No results found from configured indexers.")
         return
 
-    await notice.edit_text(f"Found {len(results)} results. Sending...")
-    for idx, result in enumerate(results, start=1):
-        await update.effective_message.reply_html(
-            format_result(result, idx),
-            disable_web_page_preview=True,
-        )
+    await notice.edit_text(f"Found {len(results)} results. Sending with pacing...")
+    await send_results(update, results)
 
 
 def build_app() -> Application:
@@ -171,7 +191,13 @@ def build_app() -> Application:
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is required")
 
-    application = ApplicationBuilder().token(token).post_init(configure_bot_commands).build()
+    application = (
+        ApplicationBuilder()
+        .token(token)
+        .rate_limiter(AIORateLimiter())
+        .post_init(configure_bot_commands)
+        .build()
+    )
     application.bot_data["prowlarr"] = ProwlarrClient()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", start))

@@ -1,3 +1,4 @@
-python-telegram-bot==21.11.1
+python-telegram-bot[rate-limiter]==21.11.1
 requests==2.32.5
 pytest==8.3.4
+pytest-asyncio==0.25.3
