@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import html
 import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urljoin, urlparse
@@ -216,6 +217,18 @@ class ProwlarrClient:
             return ""
         return magnet_from_torrent_bytes(response.content, display_name=str(item.get("title") or ""))
 
+    def _with_magnet(self, item: dict[str, Any]) -> dict[str, Any] | None:
+        if _pick_magnet(item):
+            return item
+        try:
+            magnet = self._resolve_download_to_magnet(item)
+        except Exception:
+            return None
+        if not magnet:
+            return None
+        item["magnetUrl"] = magnet
+        return item
+
     def search(self, query: str, limit: int = 10) -> list[TorrentResult]:
         query = query.strip()
         if not query:
@@ -227,14 +240,14 @@ class ProwlarrClient:
             timeout=self.timeout,
         )
         response.raise_for_status()
-        raw_items = response.json()
-        for item in raw_items:
-            if _pick_magnet(item):
-                continue
-            try:
-                magnet = self._resolve_download_to_magnet(item)
-            except Exception:
-                continue
-            if magnet:
-                item["magnetUrl"] = magnet
-        return extract_results(raw_items, limit=limit)
+        raw_items = sorted(response.json(), key=lambda item: _int_or_zero(item.get("seeders")), reverse=True)
+        resolved_items: list[dict[str, Any]] = []
+        workers = min(5, max(1, limit))
+        batch_size = max(limit, workers)
+        for start in range(0, len(raw_items), batch_size):
+            batch = raw_items[start : start + batch_size]
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                resolved_items.extend(item for item in pool.map(self._with_magnet, batch) if item is not None)
+            if len(resolved_items) >= limit:
+                break
+        return extract_results(resolved_items, limit=limit)

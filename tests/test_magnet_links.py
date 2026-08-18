@@ -86,3 +86,26 @@ def test_prowlarr_resolver_uses_magnet_redirect_location():
 
     assert magnet == "magnet:?xt=urn:btih:REDIRECTED"
     assert get.call_args.kwargs["allow_redirects"] is False
+
+
+def test_search_resolves_only_until_limit_after_sorting_by_seeders():
+    response = Mock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = [
+        {"title": f"item {i}", "indexer": "TD", "seeders": seeders, "downloadUrl": "http://127.0.0.1:9696/4/download"}
+        for i, seeders in enumerate([1, 100, 90, 80, 70], start=1)
+    ]
+
+    client = ProwlarrClient(base_url="http://127.0.0.1:9696", api_key="test")
+    resolved = []
+
+    def fake_resolve(item):
+        resolved.append(item["title"])
+        return f"magnet:?xt=urn:btih:{item['title'].replace(' ', '').upper()}"
+
+    client._resolve_download_to_magnet = fake_resolve
+    with patch("prowlarr_client.requests.get", return_value=response):
+        results = client.search("tenet", limit=2)
+
+    assert [r.title for r in results] == ["item 2", "item 3"]
+    assert resolved == ["item 2", "item 3"]
