@@ -92,6 +92,7 @@ async def run_broadcast(
     message: str,
     execute: bool,
     delay_seconds: float,
+    collection=None,
     sleeper: Callable[[float], Awaitable[None]] = asyncio.sleep,
 ) -> BroadcastStats:
     sent = failed = skipped = 0
@@ -105,6 +106,12 @@ async def run_broadcast(
                 sent += 1
             else:
                 failed += 1
+                if collection is not None:
+                    try:
+                        collection.delete_one({"chat_id": chat_id})
+                        LOG.info("Deleted unreachable chat_id=%s from MongoDB", chat_id)
+                    except Exception:  # noqa: BLE001 - deletion failure should not abort remaining sends
+                        LOG.exception("Failed to delete unreachable chat_id=%s from MongoDB", chat_id)
         if idx < total and delay_seconds > 0:
             await sleeper(delay_seconds)
     return BroadcastStats(total=total, sent=sent, failed=failed, skipped=skipped)
@@ -131,12 +138,20 @@ async def async_main() -> int:
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is required")
 
-    chat_ids = list(iter_chat_ids(get_users_collection()))
+    collection = get_users_collection()
+    chat_ids = list(iter_chat_ids(collection))
     if args.limit > 0:
         chat_ids = chat_ids[: args.limit]
 
     print(f"mode={'EXECUTE' if args.execute else 'DRY_RUN'} users={len(chat_ids)} delay={args.delay}s")
-    stats = await run_broadcast(chat_ids, Bot(token), args.message, args.execute, args.delay)
+    stats = await run_broadcast(
+        chat_ids=chat_ids,
+        bot=Bot(token),
+        message=args.message,
+        execute=args.execute,
+        delay_seconds=args.delay,
+        collection=collection,
+    )
     print(f"total={stats.total} sent={stats.sent} failed={stats.failed} skipped={stats.skipped}")
     return 0 if stats.failed == 0 else 1
 

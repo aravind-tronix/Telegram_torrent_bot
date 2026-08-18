@@ -6,11 +6,15 @@ from scripts.broadcast_alive import BroadcastStats, DEFAULT_MESSAGE, iter_chat_i
 class FakeCollection:
     def __init__(self, docs):
         self.docs = docs
+        self.deleted = []
 
     def find(self, query, projection):
         assert query == {"chat_id": {"$exists": True}}
         assert projection == {"_id": 0, "chat_id": 1}
         return iter(self.docs)
+
+    def delete_one(self, query):
+        self.deleted.append(query)
 
 
 class FakeBot:
@@ -72,10 +76,12 @@ def test_run_broadcast_dry_run_sends_nothing():
 def test_run_broadcast_execute_sends_with_delay_and_counts_failures():
     fake_sleep.calls = []
     bot = FakeBot(failing_ids={2})
+    collection = FakeCollection([])
     stats = asyncio.run(
         run_broadcast(
             chat_ids=[1, 2, 3],
             bot=bot,
+            collection=collection,
             message="Bot is back alive.",
             execute=True,
             delay_seconds=1.5,
@@ -85,4 +91,5 @@ def test_run_broadcast_execute_sends_with_delay_and_counts_failures():
 
     assert stats == BroadcastStats(total=3, sent=2, failed=1, skipped=0)
     assert [row[0] for row in bot.sent] == [1, 3]
+    assert collection.deleted == [{"chat_id": 2}]
     assert fake_sleep.calls == [1.5, 1.5]
