@@ -85,7 +85,35 @@ def info_response(label: str) -> str:
     return messages[label]
 
 
+def is_channel_update(update: Update) -> bool:
+    chat = update.effective_chat
+    return getattr(chat, "type", None) == "channel"
+
+
+def is_persistable_user_chat(update: Update) -> bool:
+    chat = update.effective_chat
+    if chat is None:
+        return False
+    chat_type = getattr(chat, "type", None)
+    if chat_type is not None:
+        return chat_type == "private"
+    try:
+        return int(chat.id) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+async def ignore_channel_update(update: Update) -> bool:
+    if not is_channel_update(update):
+        return False
+    chat_id = getattr(update.effective_chat, "id", "unknown")
+    LOG.info("Ignoring channel update from chat_id=%s; bot cannot reply unless it is a channel admin", chat_id)
+    return True
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await ignore_channel_update(update):
+        return
     await remember_chat_id_middleware(update, context)
     await update.effective_message.reply_text(
         "Hi! Send /search <query> or choose from the menu below.\n"
@@ -96,16 +124,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def readme(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await ignore_channel_update(update):
+        return
     await remember_chat_id_middleware(update, context)
     await update.effective_message.reply_html(info_response("Read me"), reply_markup=menu_keyboard())
 
 
 async def privacy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await ignore_channel_update(update):
+        return
     await remember_chat_id_middleware(update, context)
     await update.effective_message.reply_html(info_response("Privacy Policy"), reply_markup=menu_keyboard())
 
 
 async def terms(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await ignore_channel_update(update):
+        return
     await remember_chat_id_middleware(update, context)
     await update.effective_message.reply_html(info_response("Terms"), reply_markup=menu_keyboard())
 
@@ -124,9 +158,12 @@ async def configure_bot_commands(application: Application) -> None:
 
 
 async def remember_chat_id(update: Update, store: UserStore) -> bool:
-    if update.effective_chat is None:
+    if not is_persistable_user_chat(update):
         return False
-    return await asyncio.to_thread(store.ensure_user, int(update.effective_chat.id))
+    chat = update.effective_chat
+    if chat is None:
+        return False
+    return await asyncio.to_thread(store.ensure_user, int(chat.id))
 
 
 async def remember_chat_id_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -140,6 +177,8 @@ async def remember_chat_id_middleware(update: Update, context: ContextTypes.DEFA
 
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await ignore_channel_update(update):
+        return
     await remember_chat_id_middleware(update, context)
     client: ProwlarrClient = context.application.bot_data["prowlarr"]
     try:
@@ -153,6 +192,8 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await ignore_channel_update(update):
+        return
     await remember_chat_id_middleware(update, context)
     query = " ".join(context.args).strip()
     if not query:
@@ -162,6 +203,8 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def free_text_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await ignore_channel_update(update):
+        return
     await remember_chat_id_middleware(update, context)
     text = (update.effective_message.text or "").strip()
     if not text:
@@ -175,38 +218,78 @@ async def free_text_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await run_search(update, context, text)
 
 
+async def send_chat_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, **kwargs):
+    chat = update.effective_chat
+    if chat is None:
+        return None
+    return await context.bot.send_message(chat_id=chat.id, text=text, **kwargs)
+
+
+async def edit_or_send_text(notice, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    if notice is not None:
+        try:
+            await notice.edit_text(text)
+            return
+        except Exception:  # noqa: BLE001 - fallback should preserve the user-facing response
+            LOG.warning("Failed to edit search status message; sending a new message instead", exc_info=True)
+    await send_chat_text(update, context, text)
+
+
 async def send_results(
     update: Update,
     results: list[TorrentResult],
     delay_seconds: float | None = None,
     sleeper=asyncio.sleep,
+    context: ContextTypes.DEFAULT_TYPE | None = None,
 ) -> None:
     delay = message_interval_seconds() if delay_seconds is None else delay_seconds
     for idx, result in enumerate(results, start=1):
-        await update.effective_message.reply_html(
-            format_result(result, idx),
-            disable_web_page_preview=True,
-        )
+        if context is None:
+            message = update.effective_message
+            if message is None:
+                return
+            await message.reply_html(
+                format_result(result, idx),
+                disable_web_page_preview=True,
+            )
+        else:
+            await send_chat_text(
+                update,
+                context,
+                format_result(result, idx),
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
         if idx < len(results):
             await sleeper(delay)
 
 
 async def run_search(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str) -> None:
+    if await ignore_channel_update(update):
+        return
     client: ProwlarrClient = context.application.bot_data["prowlarr"]
-    notice = await update.effective_message.reply_text(f"Searching Prowlarr for: {query}")
+    try:
+        notice = await send_chat_text(update, context, f"Searching Prowlarr for: {query}")
+    except Exception:  # noqa: BLE001 - Telegram send failures should not crash polling
+        LOG.exception("failed to send search notice for %r", query)
+        return
     try:
         results = await asyncio.to_thread(client.search, query, result_limit())
     except Exception as exc:  # noqa: BLE001 - keep bot alive and report failure
         LOG.exception("search failed for %r", query)
-        await notice.edit_text(f"Search failed: {exc}")
+        await edit_or_send_text(notice, update, context, f"Search failed: {exc}")
         return
 
     if not results:
-        await notice.edit_text("No results found from configured indexers.")
+        await edit_or_send_text(notice, update, context, "No results found from configured indexers.")
         return
 
-    await notice.edit_text(f"Found {len(results)} results. Sending with pacing...")
-    await send_results(update, results)
+    await edit_or_send_text(notice, update, context, f"Found {len(results)} results. Sending with pacing...")
+    await send_results(update, results, context=context)
+
+
+async def log_unhandled_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    LOG.exception("Unhandled Telegram update error", exc_info=context.error)
 
 
 def build_app() -> Application:
@@ -232,6 +315,7 @@ def build_app() -> Application:
     application.add_handler(CommandHandler("privacy", privacy))
     application.add_handler(CommandHandler("terms", terms))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, free_text_search))
+    application.add_error_handler(log_unhandled_error)
     return application
 
 
